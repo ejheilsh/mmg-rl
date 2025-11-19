@@ -39,7 +39,7 @@ model = PPO(
     n_steps=128,          # per-env steps; with 8 envs -> 2048 samples/update
     batch_size=256,
     learning_rate=1e-5,
-    ent_coef=0.02,
+    ent_coef=0.2,
     clip_range=0.05,
 )
 
@@ -54,5 +54,5 @@ eval_callback = EvalCallback(
     render=False,
 )
 
-model.learn(total_timesteps=40_000, callback=eval_callback)
+model.learn(total_timesteps=400_000, callback=eval_callback)
 model.save("mmg_ppo")

@@ -2,18 +2,53 @@ from general import *
 
 @dataclass
 class mmg_class:
-    u0: float = 0
-    rand_seed: int  = None
+    x0: float = 0
+    y0: float = 0
+    psi0: float = None
+    u0: float = None
+    vm0: float = None
+    r0: float = None
+    nP0: float = 0
+    delta0: float = 0
+
+    rand_seed: int = None
+    n_obstacles: int = 0
     
     def __post_init__(self):
+        # simulation bounds
+        self.xmax = 50
+        self.xmin = -10
+        self.ymin = -20
+        self.ymax = 20
+
+        self.state_bounds = np.array([
+            [self.xmin, self.xmax], # x
+            [self.ymin, self.ymax], # y
+            [0, 2 * np.pi],           # psi
+            [0, 50],                # u
+            [-10, 10],              # vm
+            [-2, 2],              # r
+        ])
+
         # define the state
-        self.x = np.zeros(6)
-        self.x[3] = self.u0
-        # state: (x, y, psi, x_dot, y_dot, psi_dot (r))
+        self.x = np.array([
+            self.x0 or 0.0,
+            self.y0 or 0.0,
+            self.psi0 or 0.0,
+            self.u0 or 0.0,
+            self.vm0 or 0.0,
+            self.r0 or 0.0,
+        ])
+        # self.x[3] = self.u0
+        # state: (x, y, psi, u, vm, r)
+        # global x, global y, heading, surge vel, sway vel @ midship, yaw rate
 
         # control vector
-        self.u = np.zeros(2)
-        # controls: (nP, delta)
+        self.u = np.array([
+            self.nP0,
+            self.delta0,
+        ])
+        # controls: (nP, delta), rps and radians
 
         # time
         self.t = 0
@@ -24,12 +59,6 @@ class mmg_class:
             "nP", "delta"
         ])
 
-        # simulation bounds
-        self.xmax = 50
-        self.xmin = 0
-        self.ymin = -10
-        self.ymax = 10
-
         self.init_obstacles()
 
     def init_obstacles(self):
@@ -37,27 +66,23 @@ class mmg_class:
         if self.rand_seed is not None:
             np.random.seed(self.rand_seed)
 
-
-        # how many obstacles?
-        n_obs = 4
-
         self.obstacles = []
 
-        for _ in range(n_obs):
+        for _ in range(self.n_obstacles):
             # random center within domain, min value is adjusted so that it doesn't overlap with the ship
-            x = np.random.uniform(self.xmin + 0.1 * (self.xmax - self.xmin), self.xmax)
+            x = np.random.uniform(0 + 0.2 * np.abs((self.xmax - self.xmin)), self.xmax)
             y = np.random.uniform(self.ymin, self.ymax)
 
             # random radius
-            r = np.random.uniform(1, 2)   # adjust sizes
+            r = np.random.uniform(Lpp/4, Lpp)
 
             self.obstacles.append({"x": x, "y": y, "r": r})
 
 
-    def plot_obstacles(self, ax):
+    def plot_obstacles(self, ax, color="black"):
         for obs in self.obstacles:
             circle = plt.Circle((obs["x"], obs["y"]), obs["r"],
-                                color="gray", alpha=0.3)
+                                color=color, alpha=0.3)
             ax.add_patch(circle)
 
 
@@ -235,8 +260,6 @@ class mmg_class:
         Plot the ship's trajectory from df_history.
         """
 
-        import matplotlib.pyplot as plt
-
         # create axes if not passed in
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 6))
@@ -244,15 +267,15 @@ class mmg_class:
         df = self.df_history
 
         # Plot trajectory
-        ax.plot(df["x"], df["y"], linewidth=2, label="trajectory")
+        ax.plot(df["x"], df["y"], linewidth=2, color="black")
 
         # Start point (green)
         ax.scatter(df["x"].iloc[0], df["y"].iloc[0],
-                color="green", s=70, zorder=5, label="start")
+                color="green", s=20, zorder=5)
 
         # End point (red)
         ax.scatter(df["x"].iloc[-1], df["y"].iloc[-1],
-                color="red", s=70, zorder=5, label="end")
+                color="red", s=20, zorder=5)
 
         # Add obstacles if requested
         if show_obstacles and hasattr(self, "obstacles"):
@@ -272,22 +295,24 @@ class mmg_class:
         ax.set_xlabel("x-position")
         ax.set_ylabel("y-position")
         ax.set_title("MMG Ship Trajectory")
-        ax.legend()
+        # ax.legend()
 
-        plt.show()
+        return ax
 
-    def reset(self, u0=None):
+    def reset(self, u0=None, psi=None):
         """
         Reset MMG simulator state and return initial observation.
         """
-        # reset state
-        self.x = np.zeros(6)
+        # reset state (start at origin with zero sway/yaw rate)
+        self.x = np.zeros(6, dtype=float)
 
-        # restore initial surge velocity if provided
-        if u0 is None:
-            self.x[3] = self.u0
-        else:
-            self.x[3] = u0
+        # surge velocity
+        # u_init = np.random.uniform(self.state_bounds[0, 0], self.state_bounds[0, 1])
+        # self.x[3] = u_init
+
+        # heading
+        psi_init = np.random.uniform(self.state_bounds[2, 0], self.state_bounds[2, 1])
+        self.x[2] = psi_init
 
         # reset time
         self.t = 0.0
@@ -298,12 +323,15 @@ class mmg_class:
             "nP", "delta"
         ])
 
-        # re-generate obstacles (optional)
-        # comment out next line if you want the same obstacles every episode
+        # re-generate obstacles
         self.init_obstacles()
 
         # default control inputs
-        self.u = np.zeros(2)
+        # self.u = np.zeros(2)
+        self.u = np.array([
+            self.nP0,
+            self.delta0,
+        ])
 
         # log the initial state
         x_pos, y_pos, psi, u, vm, r = self.x
@@ -320,16 +348,23 @@ class mmg_class:
 
 
 if __name__ == "__main__":
-    mmg = mmg_class(u0=0)
-    mmg.u = np.array([10, np.radians(1)])
-    dt = 0.1
-    t_final = 200
+    fig, ax = plt.subplots()
 
-    for _ in range(int(t_final/dt)):
-        if not mmg.check_collision():
-            mmg.timestep(dt)
-        else:
-            break
+    deltas = np.linspace(-35, 35, 110)
 
-    print(f"x_final = {mmg.x}")
-    mmg.plot_trajectory()
+    for delta in deltas:
+        mmg = mmg_class(u0=0, nP0=20, delta0=np.radians(delta), n_obstacles=np.random.randint(0, 2))
+        # mmg.reset()
+        dt = 0.1
+        t_final = 60
+
+        for _ in range(int(t_final/dt)):
+            if not mmg.check_collision():
+                mmg.timestep(dt)
+            else:
+                break
+
+        print(f"x_final = {mmg.x}")
+        ax = mmg.plot_trajectory(ax=ax)
+
+    plt.show()

@@ -28,7 +28,11 @@ class MMGEnv(gym.Env):
         self.delta_max = np.radians(35.0)
         self.rudder_rate_limit_rad = np.deg2rad(1.76)  # per second
         self.n_rays = int(n_rays)
-        self.ray_angles = np.linspace(-np.pi / 2, np.pi / 2, self.n_rays)
+        # Use the configured angles but allow overriding n_rays by interpolating between endpoints
+        if len(RAY_ANGLES) == self.n_rays:
+            self.ray_angles = np.array(RAY_ANGLES, dtype=float)
+        else:
+            self.ray_angles = np.linspace(RAY_ANGLES[0], RAY_ANGLES[-1], self.n_rays)
         self.max_steps = int(max_steps)
         self.step_count = 0
 
