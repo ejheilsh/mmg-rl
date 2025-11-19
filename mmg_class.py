@@ -311,8 +311,8 @@ class mmg_class:
         # self.x[3] = u_init
 
         # heading
-        psi_init = np.random.uniform(self.state_bounds[2, 0], self.state_bounds[2, 1])
-        self.x[2] = psi_init
+        # psi_init = np.random.uniform(self.state_bounds[2, 0], self.state_bounds[2, 1])
+        # self.x[2] = psi_init
 
         # reset time
         self.t = 0.0
@@ -350,7 +350,7 @@ class mmg_class:
 if __name__ == "__main__":
     fig, ax = plt.subplots()
 
-    deltas = np.linspace(-35, 35, 110)
+    deltas = np.linspace(-35, 35, 11)
 
     for delta in deltas:
         mmg = mmg_class(u0=0, nP0=20, delta0=np.radians(delta), n_obstacles=np.random.randint(0, 2))

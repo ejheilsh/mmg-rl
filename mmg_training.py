@@ -54,5 +54,5 @@ eval_callback = EvalCallback(
     render=False,
 )
 
-model.learn(total_timesteps=400_000, callback=eval_callback)
+model.learn(total_timesteps=100_000, callback=eval_callback)
 model.save("mmg_ppo")
