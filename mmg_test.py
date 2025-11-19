@@ -16,7 +16,7 @@ model = PPO.load("mmg_ppo", env=env)
 # Rollouts with unique colors and markers
 # ---------------------------
 
-num_rollouts = 5
+num_rollouts = 1
 colors = plt.cm.viridis(np.linspace(0, 1, num_rollouts))
 markers = ["o", "s", "^", "D", "P"]   # circle, square, triangle, diamond, plus
 

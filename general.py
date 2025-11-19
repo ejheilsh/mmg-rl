@@ -81,7 +81,7 @@ K_zz = 0.25 * Lpp # yaw gyradius, estimate
 I_zG = m * K_zz**2
 
 
-N_RAYS = 9
+N_RAYS = 30
 RAY_ANGLES = np.linspace(-np.pi/2, np.pi/2, N_RAYS)
 
 

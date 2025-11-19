@@ -8,14 +8,18 @@ from general import *
 class MMGEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, u0=0, rand_seed=None, dt=0.1):
+    def __init__(self, u0=0, rand_seed=None, dt=0.1, n_rays=N_RAYS, max_steps=2000):
         super().__init__()
 
         self.dt = dt
-        self.max_range = 15
+        self.max_range = 300
         self.nP_min = 0.0
         self.nP_max = 20.0
         self.delta_max = np.radians(35.0)
+        self.n_rays = int(n_rays)
+        self.ray_angles = np.linspace(-np.pi / 2, np.pi / 2, self.n_rays)
+        self.max_steps = int(max_steps)
+        self.step_count = 0
 
         # underlying MMG simulator
         self.sim = mmg_class(u0=u0, rand_seed=rand_seed)
@@ -29,12 +33,12 @@ class MMGEnv(gym.Env):
         # -------- OBSERVATION SPACE --------
         low = np.array([
             self.sim.xmin, self.sim.ymin, -np.pi, -5, -5, -1,    # ship state
-            *([0.0] * N_RAYS)                                   # radar distances
+            *([0.0] * self.n_rays)                              # radar distances
         ], dtype=np.float32)
 
         high = np.array([
             self.sim.xmax, self.sim.ymax, np.pi, 5, 5, 1,
-            *([self.max_range] * N_RAYS)
+            *([self.max_range] * self.n_rays)
         ], dtype=np.float32)
 
         self.observation_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
@@ -45,6 +49,7 @@ class MMGEnv(gym.Env):
         super().reset(seed=seed)
 
         self.sim.reset()
+        self.step_count = 0
         obs = self.get_obs()
         info = {}
 
@@ -58,12 +63,13 @@ class MMGEnv(gym.Env):
         self.sim.u = np.array([nP, delta], dtype=float)
 
         x_old = self.sim.x[0]   # x before step
+        self.step_count += 1
 
         self.sim.timestep(self.dt)
 
         x_new, y_new, psi, u, vm, r = self.sim.x
         terminated = self.sim.check_collision()
-        truncated = False       # SB3 expects this too
+        truncated = self.step_count >= self.max_steps   # hard time limit
 
         # -------- reward --------
         reward = 0
@@ -161,7 +167,7 @@ class MMGEnv(gym.Env):
         x, y, psi = self.sim.x[0], self.sim.x[1], self.sim.x[2]
 
         distances = []
-        for rel_ang in RAY_ANGLES:
+        for rel_ang in self.ray_angles:
             ang = psi + rel_ang
             dmin = self.max_range
 
@@ -176,4 +182,3 @@ class MMGEnv(gym.Env):
             distances.append(dmin)
 
         return np.array(distances, dtype=float)
-

@@ -39,8 +39,8 @@ class mmg_class:
 
 
         # how many obstacles?
-        nmax = 50
-        n_obs = np.random.randint(0, nmax + 1) 
+        nmax = 5
+        n_obs = np.random.randint(1, nmax + 1) 
 
         self.obstacles = []
 
@@ -50,7 +50,7 @@ class mmg_class:
             y = np.random.uniform(self.ymin, self.ymax)
 
             # random radius
-            r = np.random.uniform(0.2, 1.0)   # adjust sizes
+            r = np.random.uniform(1, 2)   # adjust sizes
 
             self.obstacles.append({"x": x, "y": y, "r": r})
 
