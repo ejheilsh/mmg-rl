@@ -61,5 +61,58 @@ epsilon = 1.09
 kappa = 0.50
 f_alpha = 2.747
 
+# prop/rudder params
 w_P0 = 0.4 # model scale (L7)
 x_P_pr = -0.4 # guess... should check geometry!
+k0 = 0.2931
+k1 = -0.2753
+k2 = -0.1385
+eta = D_P / H_R # geometric ratio (eq 40)
+x_R = -0.5 * Lpp
+x_H = x_H_pr * Lpp
+
+# mass and inertial properties
+m = rho * displ
+# m_pr = m / ((1/2) * rho * Lpp**2 * d)
+m_x = m_x_pr * (1/2) * rho * Lpp**2 * d
+m_y = m_y_pr * (1/2) * rho * Lpp**2 * d
+J_z = J_z_pr * (1/2) * rho * Lpp**4 * d
+K_zz = 0.25 * Lpp # yaw gyradius, estimate
+I_zG = m * K_zz**2
+
+
+N_RAYS = 9
+RAY_ANGLES = np.linspace(-np.pi/2, np.pi/2, N_RAYS)
+
+
+def ray_circle_distance(x, y, ang, obs_x, obs_y, obs_r, max_range=50.0):
+    # Ray direction
+    dx = np.cos(ang)
+    dy = np.sin(ang)
+
+    # Shift to obstacle coordinates
+    fx = x - obs_x
+    fy = y - obs_y
+
+    # Quadratic coefficients: t^2 + 2(f·d)t + (f·f - r^2) = 0
+    B = 2 * (fx * dx + fy * dy)
+    C = fx*fx + fy*fy - obs_r**2
+    D = B*B - 4*C
+
+    if D < 0:
+        return max_range  # no intersection
+
+    sqrt_D = np.sqrt(D)
+
+    # Two solutions
+    t1 = (-B - sqrt_D) / 2
+    t2 = (-B + sqrt_D) / 2
+
+    # Need the smallest positive t
+    t_candidates = [t for t in (t1, t2) if t > 0]
+
+    if not t_candidates:
+        return max_range
+
+    t_hit = min(t_candidates)
+    return min(t_hit, max_range)
