@@ -15,6 +15,7 @@ class MMGEnv(gym.Env):
         dt=0.1,
         n_rays=N_RAYS,
         max_steps=5000,
+        n_obstacles=0,
     ):
         super().__init__()
 
@@ -36,16 +37,20 @@ class MMGEnv(gym.Env):
         self.step_count = 0
 
         # underlying MMG simulator
-        self.sim = mmg_class(u0=u0, rand_seed=rand_seed)
+        self.sim = mmg_class(u0=u0, rand_seed=rand_seed, n_obstacles=n_obstacles)
 
         # -------- ACTION SPACE --------
         # self.action_space = spaces.Box(
         #     low=np.array([-1.0, -1.0], dtype=np.float32),
         #     high=np.array([1.0, 1.0], dtype=np.float32),
         # )
+        # -------- ACTION SPACE --------
+        # Normalize action space to [-1, 1] for better learning
+        # Action 0: Propeller RPS
+        # Action 1: Rudder Angle
         self.action_space = spaces.Box(
-            low=np.array([self.nP_min], dtype=np.float32),
-            high=np.array([self.nP_max], dtype=np.float32),
+            low=np.array([-1.0, -1.0], dtype=np.float32),
+            high=np.array([1.0, 1.0], dtype=np.float32),
         )
 
         # -------- OBSERVATION SPACE --------
@@ -81,6 +86,7 @@ class MMGEnv(gym.Env):
         self.sim.u = np.array([nP, delta], dtype=float)
 
         x_old = self.sim.x[0]
+        y_old = self.sim.x[1]
         self.step_count += 1
 
         self.sim.timestep(self.dt)
@@ -92,33 +98,21 @@ class MMGEnv(gym.Env):
         # -------- reward --------
         reward = 0
 
-        # forward progress (encourage +x movement with gradual ramp toward goal)
-        goal_x = self.sim.xmax
-        # progress = x_new - x_old
-        # progress_weight = np.clip(0.3 + 0.7 * (x_new / goal_x), 0.3, 1.0)
-        # reward += progress_weight * progress
-
+        # forward progress (encourage +x movement only)
+        # scale factor to make reward meaningful
         reward += (x_new - x_old) * 100
 
-        # discourage sitting still
-        reward -= 0.01
+        # Heading shaping: Encourage facing 0 degrees (straight ahead)
+        # target_psi = 0
+        # Normalize psi to [-pi, pi] for calculation
+        # psi_norm = (psi + np.pi) % (2 * np.pi) - np.pi
+        # heading_error = np.abs(psi_norm - target_psi)
+        # Penalize heading error
+        # reward -= heading_error * 0.1
 
-        # reward -= np.abs(psi) * self.dt
-
-        # penalize heading error from straight-ahead
-        # reward -= 0.1 * abs(psi)
-        # penalize lateral deviation from centerline
-        # reward -= 0.1 * abs(y_new)
-
-
-        # collision / OOB punish (strong discouragement)
-        # if terminated:
-            # reward -= 5
-
-        # penalize proximity to obstacles via radar distances (closer → larger penalty)
-        # radar = self.get_radar_distances()
-        # clearance_penalty = np.sum((self.max_range - radar) / self.max_range)
-        # reward -= 0.1 * clearance_penalty
+        # discourage sitting still or moving backwards
+        # small penalty per step to encourage speed
+        reward -= 0.15
 
         # explicit out-of-bounds penalty (before finish line)
         out_of_bounds = (
@@ -126,13 +120,17 @@ class MMGEnv(gym.Env):
             y_new < self.sim.ymin or y_new > self.sim.ymax
         )
         if out_of_bounds:
-            reward -= 5
-            terminated = True  # force terminate even if collision handler changes
+            reward -= 10
+            terminated = True  # force terminate
+
+        # collision / OOB punish (strong discouragement)
+        if terminated:
+            reward -= 100
 
         # success bonus
+        goal_x = self.sim.xmax
         if x_new >= goal_x:
-            reward += 200
-            print("\n\nsuccess\n\n")
+            reward += 150
             terminated = True
 
         obs = self.get_obs().astype(np.float32)
@@ -142,24 +140,26 @@ class MMGEnv(gym.Env):
     def action_to_controls(self, action):
         """
         Convert agent action to physical controls.
-
-        We currently expose only the propeller RPM as an action (already in
-        physical units). The rudder is clamped at 0 for now, but the old
-        normalized [-1, 1] interface is left in comments above for future use.
+        Action is in [-1, 1].
         """
 
         a = np.asarray(action, dtype=float)
-        if a.ndim == 0:
-            nP_cmd = float(a)
+        # Handle both 1D and 2D actions for backward compatibility/safety
+        if a.size == 1:
+            act_nP = float(a)
+            act_delta = 0.0
         else:
-            nP_cmd = float(a[0])
-
+            act_nP = float(a[0])
+            act_delta = float(a[1])
+            
+        # Rescale [-1, 1] -> [nP_min, nP_max]
+        nP_cmd = self.nP_min + (act_nP + 1.0) * 0.5 * (self.nP_max - self.nP_min)
         nP = float(np.clip(nP_cmd, self.nP_min, self.nP_max))
-        prev_nP = self.sim.u[0]
-        max_dnP = self.nP_rate_limit * self.dt
-        nP = float(np.clip(nP, prev_nP - max_dnP, prev_nP + max_dnP))
 
-        delta = 0.0
+        # Rescale [-1, 1] -> [-delta_max, delta_max]
+        delta_cmd = act_delta * self.delta_max
+        delta = float(np.clip(delta_cmd, -self.delta_max, self.delta_max))
+        
         return nP, delta
 
     def get_obs(self):

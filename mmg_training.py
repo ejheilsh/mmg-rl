@@ -16,7 +16,7 @@ N_ENVS = 8
 vec_env = make_vec_env(
     MMGEnv,
     n_envs=N_ENVS,
-    env_kwargs={"u0": 0, "n_rays": N_RAYS, "max_steps": 20000},
+    env_kwargs={"u0": 0, "n_rays": N_RAYS, "max_steps": 20000, "n_obstacles": 10},
     monitor_dir="./mmg_logs",
 )
 vec_env = VecMonitor(vec_env)
@@ -36,11 +36,11 @@ model = PPO(
     vec_env,
     verbose=1,
     tensorboard_log="./mmg_tb/",
-    n_steps=128,          # per-env steps; with 8 envs -> 2048 samples/update
+    n_steps=10000,          # per-env steps; with 8 envs -> 2048 samples/update
     batch_size=256,
-    learning_rate=1e-5,
-    ent_coef=0.2,
-    clip_range=0.05,
+    learning_rate=3e-4,
+    ent_coef=0.0,
+    clip_range=0.2,
 )
 
 # save best model (highest mean reward) during training
@@ -48,11 +48,11 @@ eval_callback = EvalCallback(
     eval_env,
     best_model_save_path="./mmg_best",
     log_path="./mmg_eval_logs",
-    eval_freq=5_000,
+    eval_freq=100_000,
     n_eval_episodes=5,
     deterministic=True,
     render=False,
 )
 
-model.learn(total_timesteps=100_000, callback=eval_callback)
+model.learn(total_timesteps=3e6, callback=eval_callback)
 model.save("mmg_ppo")

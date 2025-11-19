@@ -74,7 +74,7 @@ class mmg_class:
             y = np.random.uniform(self.ymin, self.ymax)
 
             # random radius
-            r = np.random.uniform(Lpp/4, Lpp)
+            r = np.random.uniform(Lpp/10, Lpp/4)
 
             self.obstacles.append({"x": x, "y": y, "r": r})
 
@@ -306,14 +306,6 @@ class mmg_class:
         # reset state (start at origin with zero sway/yaw rate)
         self.x = np.zeros(6, dtype=float)
 
-        # surge velocity
-        # u_init = np.random.uniform(self.state_bounds[0, 0], self.state_bounds[0, 1])
-        # self.x[3] = u_init
-
-        # heading
-        # psi_init = np.random.uniform(self.state_bounds[2, 0], self.state_bounds[2, 1])
-        # self.x[2] = psi_init
-
         # reset time
         self.t = 0.0
 
@@ -327,7 +319,6 @@ class mmg_class:
         self.init_obstacles()
 
         # default control inputs
-        # self.u = np.zeros(2)
         self.u = np.array([
             self.nP0,
             self.delta0,
