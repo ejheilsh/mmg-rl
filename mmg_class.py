@@ -39,8 +39,7 @@ class mmg_class:
 
 
         # how many obstacles?
-        nmax = 5
-        n_obs = np.random.randint(1, nmax + 1) 
+        n_obs = 4
 
         self.obstacles = []
 
@@ -213,7 +212,8 @@ class mmg_class:
 
         x_pos, y_pos = self.x[0], self.x[1]
 
-        if x_pos < self.xmin or x_pos > self.xmax or y_pos < self.ymin or y_pos > self.ymax:
+        # allow crossing +x bound; still terminate if below xmin or y out of bounds
+        if x_pos < self.xmin or y_pos < self.ymin or y_pos > self.ymax:
             # print("out of bounds")
             return True
 

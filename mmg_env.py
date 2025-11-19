@@ -8,14 +8,25 @@ from general import *
 class MMGEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, u0=0, rand_seed=None, dt=0.1, n_rays=N_RAYS, max_steps=2000):
+    def __init__(
+        self,
+        u0=0,
+        u0_range=None,
+        rand_seed=None,
+        dt=0.1,
+        n_rays=N_RAYS,
+        max_steps=20000,
+    ):
         super().__init__()
 
         self.dt = dt
+        self.u0 = u0
+        self.u0_range = u0_range
         self.max_range = 300
         self.nP_min = 0.0
         self.nP_max = 20.0
         self.delta_max = np.radians(35.0)
+        self.rudder_rate_limit_rad = np.deg2rad(1.76)  # per second
         self.n_rays = int(n_rays)
         self.ray_angles = np.linspace(-np.pi / 2, np.pi / 2, self.n_rays)
         self.max_steps = int(max_steps)
@@ -48,7 +59,9 @@ class MMGEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        self.sim.reset()
+        # optionally randomize initial surge velocity
+        u0_sample = self._sample_u0()
+        self.sim.reset(u0=u0_sample)
         self.step_count = 0
         obs = self.get_obs()
         info = {}
@@ -60,6 +73,13 @@ class MMGEnv(gym.Env):
     def step(self, action):
         # action = [nP_norm, delta_norm]
         nP, delta = self.action_to_controls(action)
+        # apply rudder rate limit (deg/s converted to per-step bound)
+        prev_delta = self.sim.u[1]
+        delta = np.clip(
+            delta,
+            prev_delta - self.rudder_rate_limit_rad * self.dt,
+            prev_delta + self.rudder_rate_limit_rad * self.dt,
+        )
         self.sim.u = np.array([nP, delta], dtype=float)
 
         x_old = self.sim.x[0]   # x before step
@@ -74,23 +94,40 @@ class MMGEnv(gym.Env):
         # -------- reward --------
         reward = 0
 
-        # forward progress
-        reward += 0.1 * (x_new - x_old)
+        # forward progress (encourage +x movement with gradual ramp toward goal)
+        goal_x = self.sim.xmax
+        progress = x_new - x_old
+        progress_weight = np.clip(0.3 + 0.7 * (x_new / goal_x), 0.3, 1.0)
+        reward += progress_weight * progress
 
-        # penalize sway and rotation
-        reward -= 0.05 * abs(vm)
-        reward -= 0.01 * abs(r)
+        # penalize heading error from straight-ahead
+        reward -= 0.1 * abs(psi)
+        # penalize lateral deviation from centerline
+        reward -= 0.1 * abs(y_new)
 
-        # smooth control penalty (delta = action[1])
-        reward -= 0.001 * delta**2
 
-        # collision / OOB punish
+        # collision / OOB punish (strong discouragement)
         if terminated:
-            reward -= 100
+            reward -= 500000
+
+        # penalize proximity to obstacles via radar distances (closer → larger penalty)
+        radar = self.get_radar_distances()
+        clearance_penalty = np.sum((self.max_range - radar) / self.max_range)
+        reward -= 0.1 * clearance_penalty
+
+        # explicit out-of-bounds penalty (before finish line)
+        out_of_bounds = (
+            x_new < self.sim.xmin or
+            y_new < self.sim.ymin or y_new > self.sim.ymax
+        )
+        if out_of_bounds:
+            reward -= 5000
+            terminated = True  # force terminate even if collision handler changes
 
         # success bonus
-        if x_new >= 48:
-            reward += 200
+        if x_new >= goal_x:
+            reward += 20000
+            print("\n\nsuccess\n\n")
             terminated = True
 
         obs = self.get_obs().astype(np.float32)
@@ -106,6 +143,12 @@ class MMGEnv(gym.Env):
 
         # apply action (expects already-normalized inputs)
         nP, delta = self.action_to_controls(action)
+        prev_delta = self.sim.u[1]
+        delta = np.clip(
+            delta,
+            prev_delta - self.rudder_rate_limit_rad * self.dt,
+            prev_delta + self.rudder_rate_limit_rad * self.dt,
+        )
         self.sim.u = np.array([nP, delta], dtype=float)
 
         # check collision BEFORE step? Usually we check after
@@ -120,7 +163,7 @@ class MMGEnv(gym.Env):
         # reward = +Δx progress
         dx = x_new - x_old
         time_penalty = -0.001
-        collision_penalty = -100.0 if terminated else 0.0
+        collision_penalty = -5000.0 if terminated else 0.0
 
         reward = dx + time_penalty + collision_penalty
 
@@ -141,10 +184,23 @@ class MMGEnv(gym.Env):
 
         return nP, delta
 
+    def _sample_u0(self):
+        """
+        Sample an initial surge speed if a range is provided; otherwise return fixed u0.
+        """
+        if self.u0_range is None:
+            return self.u0
+
+        if isinstance(self.u0_range, (list, tuple)) and len(self.u0_range) == 2:
+            return float(np.random.uniform(self.u0_range[0], self.u0_range[1]))
+
+        # fallback: treat as fixed
+        return self.u0
+
     def get_obs(self):
         x_pos, y_pos, psi, u, vm, r = self.sim.x
 
-        radar = self.get_radar_distances()  # shape (9,)
+        radar = self.get_radar_distances()  # shape (n_rays,)
 
         return np.concatenate([
             np.array([x_pos, y_pos, psi, u, vm, r], dtype=float),
@@ -165,11 +221,14 @@ class MMGEnv(gym.Env):
 
     def get_radar_distances(self):
         x, y, psi = self.sim.x[0], self.sim.x[1], self.sim.x[2]
+        xmin, xmax, ymin, ymax = self.sim.xmin, self.sim.xmax, self.sim.ymin, self.sim.ymax
 
         distances = []
         for rel_ang in self.ray_angles:
             ang = psi + rel_ang
             dmin = self.max_range
+            dx = np.cos(ang)
+            dy = np.sin(ang)
 
             for obs in self.sim.obstacles:
                 d = ray_circle_distance(
@@ -178,6 +237,28 @@ class MMGEnv(gym.Env):
                     max_range=self.max_range
                 )
                 dmin = min(dmin, d)
+
+        # check intersection with domain bounds (exclude +x wall so agent can exit)
+            ts = []
+            if dx < 0:  # left boundary
+                t = (xmin - x) / dx
+                y_int = y + t * dy
+                if t > 0 and ymin <= y_int <= ymax:
+                    ts.append(t)
+            if dy > 0:  # top boundary
+                t = (ymax - y) / dy
+                x_int = x + t * dx
+                if t > 0 and xmin <= x_int <= xmax:
+                    ts.append(t)
+            if dy < 0:  # bottom boundary
+                t = (ymin - y) / dy
+                x_int = x + t * dx
+                if t > 0 and xmin <= x_int <= xmax:
+                    ts.append(t)
+
+            if ts:
+                d_bounds = min(ts)
+                dmin = min(dmin, d_bounds, self.max_range)
 
             distances.append(dmin)
 

@@ -81,8 +81,9 @@ K_zz = 0.25 * Lpp # yaw gyradius, estimate
 I_zG = m * K_zz**2
 
 
-N_RAYS = 30
-RAY_ANGLES = np.linspace(-np.pi/2, np.pi/2, N_RAYS)
+N_RAYS = 9
+# Front-facing cone: -12° to +12° in 3° increments
+RAY_ANGLES = np.deg2rad(np.arange(-12, 13, 3))
 
 
 def ray_circle_distance(x, y, ang, obs_x, obs_y, obs_r, max_range=50.0):
